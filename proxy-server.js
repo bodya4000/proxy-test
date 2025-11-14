@@ -5,8 +5,8 @@ const bodyParser = require("body-parser");
 
 const app = express();
 // Якщо ви проксуєте на інший сервер, використовуйте його URL.
-// const URL = "https://api.advision.digital"; 
-const URL = "http://localhost:9000"; 
+const URL = "https://api.advision.digital"; 
+// const URL = "http://localhost:9000"; 
 const PORT = 3001;
 
 // --- 1. Middleware Configuration ---
