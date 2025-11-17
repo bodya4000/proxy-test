@@ -5,7 +5,7 @@ const bodyParser = require("body-parser");
 
 // ---------------- CONFIG ----------------
 const PORT = 3001;
-const DEFAULT_TARGET_URL = "https://api.advision.digital";
+const DEFAULT_TARGET_URL = "https://api-dev.advision.digital";
 const STORAGE_URL_BASE = "https://hel1.your-objectstorage.com";
 
 // ---------------- EXPRESS APP ----------------
