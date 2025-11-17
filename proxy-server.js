@@ -3,13 +3,13 @@ const cors = require("cors");
 const axios = require("axios");
 const bodyParser = require("body-parser");
 
-const app = express();
-// Якщо ви проксуєте на інший сервер, використовуйте його URL.
-const URL = "https://api.advision.digital"; 
-// const URL = "http://localhost:9000"; 
+// ---------------- CONFIG ----------------
 const PORT = 3001;
+const DEFAULT_TARGET_URL = "https://api.advision.digital";
+const STORAGE_URL_BASE = "https://hel1.your-objectstorage.com";
 
-// --- 1. Middleware Configuration ---
+// ---------------- EXPRESS APP ----------------
+const app = express();
 
 app.use(
   cors({
@@ -22,74 +22,64 @@ app.use(
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// --- 2. Proxy Handler Function ---
+// ---------------- HELPERS ----------------
+function handleStorage(req) {
+  if (!req.path.includes("storage")) return null;
 
-/**
- * Handles proxying the incoming request to the target URL.
- * @param {object} req - Express request object.
- * @param {object} res - Express response object.
- * @param {string} targetPath - The path to proxy.
- * @param {boolean} checkRedirect - Whether to follow a 302 redirect.
- */
-async function handleProxy(req, res, targetPath, checkRedirect = false) {
+  const subpath = req.query.subpath;
+  if (!subpath) return null;
+
+  return `${STORAGE_URL_BASE}/${subpath}`;
+}
+
+async function handleRedirect(response, res) {
+  if (response.status === 302 && response.headers.location) {
+    console.log(`[PROXY] Following redirect → ${response.headers.location}`);
+    const redirected = await axios.get(response.headers.location, { responseType: "json" });
+    res.status(redirected.status).json(redirected.data);
+    return true;
+  }
+  return false;
+}
+
+async function handleRequest(req, res) {
   try {
-    const targetUrl = URL + targetPath;
+    let targetUrl = handleStorage(req) || DEFAULT_TARGET_URL + req.path;
 
-    console.log(`-----------------------------------`);
-    console.log(`[PROXY] Caught: ${req.method} ${req.path}`);
-    // *** ДОДАНО ДІАГНОСТИКУ QUERY PARAMETERS ***
-    console.log(`[PROXY] Query Params (req.query):`, req.query); 
-    console.log(`[PROXY] Proxying to: ${targetUrl} (with query params)`);
-    console.log(`-----------------------------------`);
+
+    const isStorageFile = req.path.includes("storage");
 
     const response = await axios({
       method: req.method,
       url: targetUrl,
-      // Вбудована функція 'params: req.query' ПРАВИЛЬНО додає параметри запиту до targetUrl.
-      params: req.query, 
+      params: req.query,
       data: req.body,
-
       headers: {
-        // Передача користувацьких заголовків
         Pointauth: req.headers["pointauth"],
         Authorization: req.headers["authorization"],
-        
-        // Стандартні заголовки
-        Accept: "application/json",
-        "Content-Type": req.headers["content-type"] || "application/json",
       },
-      // Дозволяє axios не викидати помилку на не-2xx статуси (наприклад, 404, 500)
-      validateStatus: () => true, 
+      responseType: isStorageFile ? "stream" : "json",
+      validateStatus: () => true,
     });
 
-    // Handle 302 redirect logic (if requested)
-    if (checkRedirect && response.status === 302 && response.headers.location) {      
-      console.log(`[PROXY] Following redirect to: ${response.headers.location}`);
-      const redirectedResponse = await axios.get(response.headers.location, {
-        responseType: "json",
-      });
-      return res.status(redirectedResponse.status).json(redirectedResponse.data);
-    }   
-    
-    // Send the response back to the original client
-    res.status(response.status).json(response.data);
+    if (isStorageFile) {
+      res.status(response.status);
+      res.setHeader("Content-Type", response.headers["content-type"] || "application/octet-stream");
+      response.data.pipe(res);
+    } else {
+      res.status(response.status).json(response.data);
+    }
   } catch (err) {
-    console.error(`[PROXY ERROR] (${req.path}):`, err.message);
-    res.status(err.response?.status || 500).send({
+    console.error(`[PROXY ERROR] ${req.path}:`, err.message);
+    res.status(err.response?.status || 500).json({
       error: `Proxy failed: ${err.message}`,
       route: req.path,
     });
   }
 }
 
-// --- 3. Catch-All Route (The Final Handler) ---
+app.use((req, res) => handleRequest(req, res));
 
-// Цей маршрут 'app.use' захоплює ВСІ запити, які не були оброблені раніше.
-// Це ідеально підходить для проксі-сервера.
-// Я залишив лише ОДИН такий маршрут, щоб уникнути плутанини.
-app.use((req, res) => {
-  handleProxy(req, res, req.path, false);
+app.listen(PORT, () => {
+  console.log(`Proxy running on port ${PORT}, forwarding requests to ${DEFAULT_TARGET_URL}`);
 });
-
-
-app.listen(PORT, () => console.log(`Proxy running on port ${PORT} and forwarding requests to ${URL}`));
