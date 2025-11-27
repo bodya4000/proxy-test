@@ -45,8 +45,6 @@ async function handleRedirect(response, res) {
 async function handleRequest(req, res) {
   try {
     let targetUrl = handleStorage(req) || DEFAULT_TARGET_URL + req.path;
-
-
     const isStorageFile = req.path.includes("storage");
 
     const response = await axios({
@@ -61,6 +59,14 @@ async function handleRequest(req, res) {
       responseType: isStorageFile ? "stream" : "json",
       validateStatus: () => true,
     });
+
+		if (response.status === 302 && response.headers.location) {
+			console.log(`[PROXY] Following redirect → ${response.headers.location}`);
+			const redirected = await axios.get(response.headers.location, { responseType: "json" });
+			console.log(redirected.data);
+			
+			return res.status(redirected.status).json(redirected.data);
+		}
 
     if (isStorageFile) {
       res.status(response.status);
