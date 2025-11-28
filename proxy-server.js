@@ -46,6 +46,8 @@ async function handleRequest(req, res) {
   try {
     let targetUrl = handleStorage(req) || DEFAULT_TARGET_URL + req.path;
     const isStorageFile = req.path.includes("storage");
+		// const isSchedule = req.path === "/interface"
+		// const responseType = isStorageFile ? "stream" : ( isSchedule ? "text" :  "json" )
 
     const response = await axios({
       method: req.method,
@@ -60,19 +62,12 @@ async function handleRequest(req, res) {
       validateStatus: () => true,
     });
 
-		if (response.status === 302 && response.headers.location) {
-			console.log(`[PROXY] Following redirect → ${response.headers.location}`);
-			const redirected = await axios.get(response.headers.location, { responseType: "json" });
-			console.log(redirected.data);
-			
-			return res.status(redirected.status).json(redirected.data);
-		}
-
     if (isStorageFile) {
       res.status(response.status);
       res.setHeader("Content-Type", response.headers["content-type"] || "application/octet-stream");
       response.data.pipe(res);
     } else {
+			console.log('returning status ' + response.status);
       res.status(response.status).json(response.data);
     }
   } catch (err) {
