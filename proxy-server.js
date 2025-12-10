@@ -5,8 +5,9 @@ const bodyParser = require("body-parser");
 
 // ---------------- CONFIG ----------------
 const PORT = 3001;
-const DEFAULT_TARGET_URL = "https://api-dev.advision.digital";
+const DEFAULT_TARGET_URL = "https://api.advision.digital";
 const STORAGE_URL_BASE = "https://hel1.your-objectstorage.com";
+const STORAGE_2_URL_BASE = "http://api.advision.digital/public";
 
 // ---------------- EXPRESS APP ----------------
 const app = express();
@@ -24,13 +25,21 @@ app.use(bodyParser.urlencoded({ extended: true }));
 
 // ---------------- HELPERS ----------------
 function handleStorage(req) {
-  if (!req.path.includes("storage")) return null;
+  if (req.path.includes("storage")) {
+    const subpath = req.query.subpath;
+    if (!subpath) return null;
 
-  const subpath = req.query.subpath;
-  if (!subpath) return null;
+    return `${STORAGE_URL_BASE}/${subpath}`;
+  };
 
-  return `${STORAGE_URL_BASE}/${subpath}`;
+  if (req.path.includes("defaults")) {
+    const subpath = req.query.subpath;
+    if (!subpath) return null;
+
+    return `${STORAGE_2_URL_BASE}/${subpath}`;
+  }
 }
+
 
 async function handleRedirect(response, res) {
   if (response.status === 302 && response.headers.location) {
@@ -45,7 +54,7 @@ async function handleRedirect(response, res) {
 async function handleRequest(req, res) {
   try {
     let targetUrl = handleStorage(req) || DEFAULT_TARGET_URL + req.path;
-    const isStorageFile = req.path.includes("storage");
+    const isStorageFile = req.path.includes("storage") || req.path.includes("defaults");
 		// const isSchedule = req.path === "/interface"
 		// const responseType = isStorageFile ? "stream" : ( isSchedule ? "text" :  "json" )
 
@@ -67,7 +76,7 @@ async function handleRequest(req, res) {
       res.setHeader("Content-Type", response.headers["content-type"] || "application/octet-stream");
       response.data.pipe(res);
     } else {
-			console.log('returning status ' + response.status);
+			console.log('returning status ' + response.status + ' of ' + req.path);
       res.status(response.status).json(response.data);
     }
   } catch (err) {
