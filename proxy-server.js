@@ -2,94 +2,80 @@ const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
 const bodyParser = require("body-parser");
+const { pipeline } = require("stream");
 
-// ---------------- CONFIG ----------------
+const app = express();
 const PORT = 3001;
 const DEFAULT_TARGET_URL = "https://api.advision.digital";
 const STORAGE_URL_BASE = "https://hel1.your-objectstorage.com";
 const STORAGE_2_URL_BASE = "http://api.advision.digital/public";
 
-// ---------------- EXPRESS APP ----------------
-const app = express();
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "Pointauth"],
+  exposedHeaders: ["Content-Type"]
+}));
 
-app.use(
-  cors({
-    origin: "*",
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "Pointauth"],
-  })
-);
 
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+app.use(bodyParser.json({ limit: "100mb" }));
+app.use(bodyParser.urlencoded({ limit: "100mb", extended: true }));
 
-// ---------------- HELPERS ----------------
 function handleStorage(req) {
   if (req.path.includes("storage")) {
     const subpath = req.query.subpath;
-    if (!subpath) return null;
-
-    return `${STORAGE_URL_BASE}/${subpath}`;
-  };
-
+    return subpath ? `${STORAGE_URL_BASE}/${subpath}` : null;
+  }
   if (req.path.includes("defaults")) {
     const subpath = req.query.subpath;
-    if (!subpath) return null;
-
-    return `${STORAGE_2_URL_BASE}/${subpath}`;
+    return subpath ? `${STORAGE_2_URL_BASE}/${subpath}` : null;
   }
-}
-
-
-async function handleRedirect(response, res) {
-  if (response.status === 302 && response.headers.location) {
-    console.log(`[PROXY] Following redirect → ${response.headers.location}`);
-    const redirected = await axios.get(response.headers.location, { responseType: "json" });
-    res.status(redirected.status).json(redirected.data);
-    return true;
-  }
-  return false;
+  return null;
 }
 
 async function handleRequest(req, res) {
   try {
     let targetUrl = handleStorage(req) || DEFAULT_TARGET_URL + req.path;
     const isStorageFile = req.path.includes("storage") || req.path.includes("defaults");
-		// const isSchedule = req.path === "/interface"
-		// const responseType = isStorageFile ? "stream" : ( isSchedule ? "text" :  "json" )
+    const isMultipart = req.headers["content-type"]?.includes("multipart/form-data");
 
-    const response = await axios({
+    const axiosConfig = {
       method: req.method,
       url: targetUrl,
       params: req.query,
-      data: req.body,
       headers: {
-        Pointauth: req.headers["pointauth"],
-        Authorization: req.headers["authorization"],
+        Pointauth: req.headers["pointauth"] || "",
+        Authorization: req.headers["authorization"] || "",
+        "Content-Type": req.headers["content-type"],
       },
       responseType: isStorageFile ? "stream" : "json",
       validateStatus: () => true,
-    });
+    };
+
+    axiosConfig.data = isMultipart ? req : req.body;
+
+    const response = await axios(axiosConfig);
 
     if (isStorageFile) {
-      res.status(response.status);
+      res.setHeader("Access-Control-Allow-Origin", "*"); 
       res.setHeader("Content-Type", response.headers["content-type"] || "application/octet-stream");
-      response.data.pipe(res);
+      
+      pipeline(response.data, res, (err) => {
+        if (err) console.error("[STREAM ERROR]", err.message);
+      });
     } else {
-			console.log('returning status ' + response.status + ' of ' + req.path);
       res.status(response.status).json(response.data);
     }
   } catch (err) {
     console.error(`[PROXY ERROR] ${req.path}:`, err.message);
-    res.status(err.response?.status || 500).json({
-      error: `Proxy failed: ${err.message}`,
-      route: req.path,
-    });
+    if (!res.headersSent) {
+      res.status(500).json({ error: err.message });
+    }
   }
 }
 
-app.use((req, res) => handleRequest(req, res));
+app.use(handleRequest);
 
 app.listen(PORT, () => {
-  console.log(`Proxy running on port ${PORT}, forwarding requests to ${DEFAULT_TARGET_URL}`);
+  console.log(`Proxy running on port ${PORT}`);
 });
